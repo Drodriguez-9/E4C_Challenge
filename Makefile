@@ -1,5 +1,4 @@
 .PHONY: clean data lint requirements sync_data_to_s3 sync_data_from_s3
-
 #################################################################################
 # GLOBALS                                                                       #
 #################################################################################
@@ -16,6 +15,13 @@ else
 HAS_CONDA=True
 endif
 
+DATA_URL=https://drive.google.com/file/d/1ZcnWwMI4FfZWMuseP_FGILfr5GrV59Sa
+# Google Drive ID for the data/raw/data_scripts.zip file
+GDRIVE_FILE_ID=1ZcnWwMI4FfZWMuseP_FGILfr5GrV59Sa
+# Directories
+RAW_DATA_DIR=data/raw
+REF_STUDENTS_DIR=references/students
+
 #################################################################################
 # COMMANDS                                                                      #
 #################################################################################
@@ -25,8 +31,24 @@ requirements: test_environment
 	$(PYTHON_INTERPRETER) -m pip install -U pip setuptools wheel
 	$(PYTHON_INTERPRETER) -m pip install -r requirements.txt
 
-## Make Dataset
+## Data download and storing 
 data: requirements
+	@echo "Creating directories..."
+	mkdir -p data/raw data/processed src/models/utils
+	@echo "Downloading data from Google Drive..."
+	gdown $(GDRIVE_FILE_ID) --output data/raw/data_scripts.zip
+	@echo "Unzipping specific files to raw data directory..."
+	unzip -j -o data/raw/data_scripts.zip "students/students_drahi_production_consumption_hourly.csv" -d $(RAW_DATA_DIR)
+	unzip -j -o data/raw/data_scripts.zip "students/nan_mask_drahi_production_consumption_hourly.csv" -d $(RAW_DATA_DIR)
+	@echo "Unzipping the rest of the files to references directory..."
+	unzip -j -o data/raw/data_scripts.zip "students/challenge_utils.py" -d "src/models/utils"
+	unzip -j -o data/raw/data_scripts.zip "students/check_model.py" -d "src/models/utils"
+	unzip -j -o data/raw/data_scripts.zip "students/sample_view_time_series.py" -d "src/models/utils"
+	@echo "Cleanup downloaded zip file..."
+	rm -f data/raw/data_scripts.zip
+	@echo "Data preparation complete."
+
+process_data: 
 	$(PYTHON_INTERPRETER) src/data/make_dataset.py data/raw data/processed
 
 ## Delete all compiled Python files
@@ -46,30 +68,16 @@ else
 	aws s3 sync data/ s3://$(BUCKET)/data/ --profile $(PROFILE)
 endif
 
-## Download Data from S3
-sync_data_from_s3:
-ifeq (default,$(PROFILE))
-	aws s3 sync s3://$(BUCKET)/data/ data/
-else
-	aws s3 sync s3://$(BUCKET)/data/ data/ --profile $(PROFILE)
-endif
-
 ## Set up python interpreter environment
 create_environment:
 ifeq (True,$(HAS_CONDA))
-		@echo ">>> Detected conda, creating conda environment."
+	@echo ">>> Detected conda, creating conda environment."
 ifeq (3,$(findstring 3,$(PYTHON_INTERPRETER)))
 	conda create --name $(PROJECT_NAME) python=3
 else
 	conda create --name $(PROJECT_NAME) python=2.7
 endif
-		@echo ">>> New conda env created. Activate with:\nsource activate $(PROJECT_NAME)"
-else
-	$(PYTHON_INTERPRETER) -m pip install -q virtualenv virtualenvwrapper
-	@echo ">>> Installing virtualenvwrapper if not already installed.\nMake sure the following lines are in shell startup file\n\
-	export WORKON_HOME=$$HOME/.virtualenvs\nexport PROJECT_HOME=$$HOME/Devel\nsource /usr/local/bin/virtualenvwrapper.sh\n"
-	@bash -c "source `which virtualenvwrapper.sh`;mkvirtualenv $(PROJECT_NAME) --python=$(PYTHON_INTERPRETER)"
-	@echo ">>> New virtualenv created. Activate with:\nworkon $(PROJECT_NAME)"
+	@echo ">>> New conda env created. Activate with:\nsource activate $(PROJECT_NAME)"
 endif
 
 ## Test python environment is setup correctly
